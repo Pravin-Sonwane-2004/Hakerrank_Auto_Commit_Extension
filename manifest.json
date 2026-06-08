@@ -1,0 +1,46 @@
+{
+  "manifest_version": 3,
+  "name": "HackerRank GitHub Sync",
+  "version": "1.0.0",
+  "description": "Automatically saves accepted HackerRank solutions to a GitHub repository.",
+  "minimum_chrome_version": "114",
+  "permissions": [
+    "activeTab",
+    "notifications",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://hackerrank.com/*",
+    "https://www.hackerrank.com/*",
+    "https://*.hackerrank.com/*",
+    "https://api.github.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "HackerRank GitHub Sync",
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://hackerrank.com/*",
+        "https://www.hackerrank.com/*",
+        "https://*.hackerrank.com/*"
+      ],
+      "js": [
+        "utils.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
