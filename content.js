@@ -4,11 +4,17 @@
   const Utils = global.HRGitHubSyncUtils;
 
   const state = {
+    disabled: false,
     lastSubmitClickAt: 0,
     lastSentKey: "",
     lastSentAt: 0,
-    route: location.href
+    route: location.href,
+    warnedMainWorldReadFailed: false
   };
+
+  let observer = null;
+  let routeTimer = 0;
+  let focusHandler = null;
 
   const acceptedSelectorCandidates = [
     "[data-automation*='result' i]",
@@ -77,19 +83,27 @@
   }, true);
 
   const scheduleAcceptedCheck = Utils.debounce(() => {
+    if (state.disabled) {
+      return;
+    }
+
     checkForAcceptedSubmission(false).catch((error) => {
       console.warn("[HackerRank GitHub Sync] Accepted-submission check failed.", error);
     });
   }, 900);
 
-  const observer = new MutationObserver(() => scheduleAcceptedCheck());
+  observer = new MutationObserver(() => scheduleAcceptedCheck());
   observer.observe(document.documentElement, {
     childList: true,
     subtree: true,
     characterData: true
   });
 
-  setInterval(() => {
+  routeTimer = setInterval(() => {
+    if (state.disabled) {
+      return;
+    }
+
     if (state.route !== location.href) {
       state.route = location.href;
       state.lastSentKey = "";
@@ -99,10 +113,15 @@
     scheduleAcceptedCheck();
   }, 4000);
 
-  window.addEventListener("focus", () => scheduleAcceptedCheck());
+  focusHandler = () => scheduleAcceptedCheck();
+  window.addEventListener("focus", focusHandler);
   scheduleAcceptedCheck();
 
   async function checkForAcceptedSubmission(force) {
+    if (state.disabled) {
+      return;
+    }
+
     if (!Utils.isChallengeUrl(location.href)) {
       return;
     }
@@ -279,80 +298,15 @@
         return response.payload;
       }
     } catch (error) {
-      console.warn("[HackerRank GitHub Sync] MAIN-world Monaco read failed.", error);
+      if (isExtensionContextInvalidated(error)) {
+        disableContentScript();
+      } else if (!state.warnedMainWorldReadFailed) {
+        state.warnedMainWorldReadFailed = true;
+        console.warn("[HackerRank GitHub Sync] MAIN-world Monaco read failed.", error);
+      }
     }
 
-    const requestId = `${Utils.APP_PREFIX}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
-
-    // Fallback for older Chromium builds or blocked scripting calls.
-    return new Promise((resolve) => {
-      const timeout = setTimeout(() => {
-        cleanup();
-        resolve({ code: "", language: "" });
-      }, 1200);
-
-      function cleanup() {
-        clearTimeout(timeout);
-        window.removeEventListener("message", onMessage);
-      }
-
-      function onMessage(event) {
-        if (event.source !== window || !event.data || event.data.type !== "HRGS_MONACO_CODE_RESPONSE") {
-          return;
-        }
-
-        if (event.data.requestId !== requestId) {
-          return;
-        }
-
-        cleanup();
-        resolve(event.data.payload || { code: "", language: "" });
-      }
-
-      window.addEventListener("message", onMessage);
-      injectPageReader(requestId);
-    });
-  }
-
-  function injectPageReader(requestId) {
-    const script = document.createElement("script");
-
-    script.textContent = `
-      (() => {
-        const requestId = ${JSON.stringify(requestId)};
-        const result = { code: "", language: "" };
-
-        try {
-          const monaco = window.monaco;
-          const models = monaco && monaco.editor && typeof monaco.editor.getModels === "function"
-            ? monaco.editor.getModels()
-            : [];
-          const model = models.find((candidate) => {
-            try {
-              return candidate && typeof candidate.getValue === "function" && candidate.getValue().trim();
-            } catch (_) {
-              return false;
-            }
-          }) || models[0];
-
-          if (model) {
-            result.code = typeof model.getValue === "function" ? model.getValue() : "";
-            result.language = typeof model.getLanguageId === "function" ? model.getLanguageId() : "";
-          }
-        } catch (error) {
-          result.error = error && error.message ? error.message : String(error);
-        }
-
-        window.postMessage({
-          type: "HRGS_MONACO_CODE_RESPONSE",
-          requestId,
-          payload: result
-        }, "*");
-      })();
-    `;
-
-    (document.documentElement || document.head || document.body).appendChild(script);
-    script.remove();
+    return { code: "", language: "" };
   }
 
   function readVisibleEditorText() {
@@ -394,5 +348,28 @@
 
   function compactText(value) {
     return String(value || "").replace(/\s+/g, " ").trim();
+  }
+
+  function isExtensionContextInvalidated(error) {
+    return /extension context invalidated/i.test(Utils.toErrorMessage(error));
+  }
+
+  function disableContentScript() {
+    state.disabled = true;
+
+    if (observer) {
+      observer.disconnect();
+      observer = null;
+    }
+
+    if (routeTimer) {
+      clearInterval(routeTimer);
+      routeTimer = 0;
+    }
+
+    if (focusHandler) {
+      window.removeEventListener("focus", focusHandler);
+      focusHandler = null;
+    }
   }
 })(globalThis);

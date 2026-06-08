@@ -102,22 +102,16 @@
 
   function readFormSettings() {
     const tokenFromForm = fields.githubToken.value.trim();
-    const nextSettings = Utils.mergeSettings({
+    const nextSettings = Utils.normalizeGitHubSettings({
       githubToken: tokenFromForm || currentSettings.githubToken,
       owner: fields.owner.value.trim(),
       repo: fields.repo.value.trim(),
       branch: fields.branch.value.trim() || "main"
     });
+    const errors = Utils.validateGitHubSettings(nextSettings);
 
-    const missing = [];
-
-    if (!nextSettings.githubToken) missing.push("GitHub token");
-    if (!nextSettings.owner) missing.push("repository owner");
-    if (!nextSettings.repo) missing.push("repository name");
-    if (!nextSettings.branch) missing.push("branch name");
-
-    if (missing.length) {
-      throw new Error(`Missing ${missing.join(", ")}.`);
+    if (errors.length) {
+      throw new Error(`Check settings: ${errors.join(", ")}.`);
     }
 
     return nextSettings;

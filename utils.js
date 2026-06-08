@@ -16,6 +16,135 @@
     branch: "main"
   });
 
+  function cleanRepositoryPart(value) {
+    return String(value || "")
+      .trim()
+      .replace(/^@/, "")
+      .replace(/^\/+|\/+$/g, "")
+      .replace(/\.git$/i, "");
+  }
+
+  function extractGitHubRepository(value) {
+    const text = String(value || "")
+      .trim()
+      .replace(/^<|>$/g, "");
+
+    if (!text) {
+      return null;
+    }
+
+    try {
+      const parsed = new URL(text);
+
+      if (/^(www\.)?github\.com$/i.test(parsed.hostname)) {
+        const segments = parsed.pathname.split("/").filter(Boolean);
+
+        if (segments.length >= 2) {
+          return {
+            owner: cleanRepositoryPart(segments[0]),
+            repo: cleanRepositoryPart(segments[1])
+          };
+        }
+      }
+    } catch (_) {
+      // Fall through to shorthand and SSH forms.
+    }
+
+    const noSchemeUrlMatch = text.match(/^(?:www\.)?github\.com[/:]([^/\s]+)\/([^/\s#?]+?)(?:\.git)?(?:[/?#].*)?$/i);
+
+    if (noSchemeUrlMatch) {
+      return {
+        owner: cleanRepositoryPart(noSchemeUrlMatch[1]),
+        repo: cleanRepositoryPart(noSchemeUrlMatch[2])
+      };
+    }
+
+    const sshUrlMatch = text.match(/^(?:git@github\.com:|ssh:\/\/git@github\.com\/)([^/\s]+)\/([^/\s#?]+?)(?:\.git)?(?:[#?].*)?$/i);
+
+    if (sshUrlMatch) {
+      return {
+        owner: cleanRepositoryPart(sshUrlMatch[1]),
+        repo: cleanRepositoryPart(sshUrlMatch[2])
+      };
+    }
+
+    const shorthandMatch = text.match(/^@?([^/\s]+)\/([^/\s]+?)(?:\.git)?$/);
+
+    if (shorthandMatch && !/^(?:www\.)?github\.com$/i.test(shorthandMatch[1])) {
+      return {
+        owner: cleanRepositoryPart(shorthandMatch[1]),
+        repo: cleanRepositoryPart(shorthandMatch[2])
+      };
+    }
+
+    return null;
+  }
+
+  function normalizeGitHubSettings(settings) {
+    const merged = {
+      ...DEFAULT_SETTINGS,
+      ...(settings || {})
+    };
+    const repoFromRepoField = extractGitHubRepository(merged.repo);
+    const repoFromOwnerField = extractGitHubRepository(merged.owner);
+    let owner = cleanRepositoryPart(merged.owner);
+    let repo = cleanRepositoryPart(merged.repo);
+    let branch = String(merged.branch || DEFAULT_SETTINGS.branch).trim();
+
+    if (repoFromRepoField) {
+      owner = repoFromRepoField.owner;
+      repo = repoFromRepoField.repo;
+    } else if (repoFromOwnerField) {
+      owner = repoFromOwnerField.owner;
+
+      if (!repo || repo === cleanRepositoryPart(merged.owner)) {
+        repo = repoFromOwnerField.repo;
+      }
+    }
+
+    if (!branch) {
+      branch = DEFAULT_SETTINGS.branch;
+    }
+
+    return {
+      githubToken: String(merged.githubToken || "").trim(),
+      owner,
+      repo,
+      branch
+    };
+  }
+
+  function validateGitHubSettings(settings) {
+    const normalized = normalizeGitHubSettings(settings);
+    const errors = [];
+
+    if (!normalized.githubToken) {
+      errors.push("GitHub token");
+    }
+
+    if (!normalized.owner) {
+      errors.push("repository owner");
+    } else if (!isCleanRepositoryPart(normalized.owner)) {
+      errors.push("repository owner must be only the GitHub user or organization");
+    }
+
+    if (!normalized.repo) {
+      errors.push("repository name");
+    } else if (!isCleanRepositoryPart(normalized.repo)) {
+      errors.push("repository name must be only the repository name");
+    }
+
+    if (!normalized.branch) {
+      errors.push("branch name");
+    }
+
+    return errors;
+  }
+
+  function isCleanRepositoryPart(value) {
+    return !/[\\/?#\s]/.test(String(value || ""));
+  }
+
   const LANGUAGE_CONFIG = Object.freeze({
     java: {
       label: "Java",
@@ -300,10 +429,7 @@
   }
 
   function mergeSettings(settings) {
-    return {
-      ...DEFAULT_SETTINGS,
-      ...(settings || {})
-    };
+    return normalizeGitHubSettings(settings);
   }
 
   function maskToken(token) {
@@ -340,6 +466,7 @@
     makeSubmissionKey,
     maskToken,
     mergeSettings,
+    normalizeGitHubSettings,
     normalizeCodeForCommit,
     normalizeCodeForHash,
     normalizeLanguage,
@@ -351,6 +478,7 @@
     titleToPascalFileName,
     toErrorMessage,
     truncate,
+    validateGitHubSettings,
     utf8ToBase64
   });
 })(globalThis);
